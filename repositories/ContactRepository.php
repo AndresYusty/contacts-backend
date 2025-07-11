@@ -36,6 +36,27 @@ class ContactRepository
         return (int)$this->db->lastInsertId();
     }
 
+    public function createWithPhones(string $fn, string $ln, string $email, array $phones): int
+    {
+        try {
+            $this->db->beginTransaction();
+            
+            $id = $this->create($fn, $ln, $email);
+            
+            foreach ($phones as $num) {
+                if (trim($num) !== '') {
+                    $this->phoneRepo->create($id, $num);
+                }
+            }
+            
+            $this->db->commit();
+            return $id;
+        } catch (\Exception $e) {
+            $this->db->rollBack();
+            throw $e;
+        }
+    }
+
     public function delete(int $id): bool
     {
         $stmt = $this->db->prepare('DELETE FROM contacts WHERE id = ?');
@@ -44,19 +65,32 @@ class ContactRepository
 
     public function update(int $id, string $fn, string $ln, string $email, array $phones): bool
     {
-        $stmt = $this->db->prepare(
-            'UPDATE contacts SET first_name = ?, last_name = ?, email = ? WHERE id = ?'
-        );
-        $ok = $stmt->execute([$fn, $ln, $email, $id]);
-        if (!$ok) return false;
-        // Actualizar teléfonos: eliminar todos y volver a insertar
-        $this->phoneRepo->deleteByContactId($id);
-        foreach ($phones as $num) {
-            if (trim($num) !== '') {
-                $this->phoneRepo->create($id, $num);
+        try {
+            $this->db->beginTransaction();
+            
+            $stmt = $this->db->prepare(
+                'UPDATE contacts SET first_name = ?, last_name = ?, email = ? WHERE id = ?'
+            );
+            $ok = $stmt->execute([$fn, $ln, $email, $id]);
+            if (!$ok) {
+                $this->db->rollBack();
+                return false;
             }
+            
+            // Actualizar teléfonos: eliminar todos y volver a insertar
+            $this->phoneRepo->deleteByContactId($id);
+            foreach ($phones as $num) {
+                if (trim($num) !== '') {
+                    $this->phoneRepo->create($id, $num);
+                }
+            }
+            
+            $this->db->commit();
+            return true;
+        } catch (\Exception $e) {
+            $this->db->rollBack();
+            throw $e;
         }
-        return true;
     }
 
     public function getById(int $id): ?Contact

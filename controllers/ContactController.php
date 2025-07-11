@@ -1,109 +1,63 @@
 <?php
-require_once __DIR__ . '/../repositories/ContactRepository.php';
+require_once __DIR__ . '/../services/ContactService.php';
 
 class ContactController
 {
-    private ContactRepository $repo;
+    private ContactService $service;
 
     public function __construct()
     {
-        $this->repo = new ContactRepository();
+        $this->service = new ContactService();
     }
 
     public function index(): void
     {
-        $contacts = $this->repo->getAll();
-        $this->respond(200, array_map(fn($c) => $c->toArray(), $contacts));
+        try {
+            $contacts = $this->service->getAllContacts();
+            $this->respond(200, $contacts);
+        } catch (\Exception $e) {
+            $statusCode = $e->getCode() ?: 500;
+            $this->respond($statusCode, ['error' => $e->getMessage()]);
+        }
     }
 
     public function store(): void
     {
         $payload = json_decode(file_get_contents('php://input'), true) ?: [];
-        // Validaciones básicas
-        foreach (['first_name','last_name','email'] as $field) {
-            if (empty($payload[$field] ?? '')) {
-                $this->respond(400, ['error' => "$field es requerido"]);
-                return;
-            }
-        }
-        if (!filter_var($payload['email'], FILTER_VALIDATE_EMAIL)) {
-            $this->respond(400, ['error' => "Email no válido"]);
-            return;
-        }
-
+        
         try {
-            // Transacción: contacto + teléfonos
-            $db = Database::getConnection();
-            $db->beginTransaction();
-            $id = $this->repo->create(
-                $payload['first_name'],
-                $payload['last_name'],
-                $payload['email']
-            );
-            // bonus: teléfonos opcionales
-            if (!empty($payload['phones']) && is_array($payload['phones'])) {
-                foreach ($payload['phones'] as $num) {
-                    if (trim($num) === '') {
-                        $db->rollBack();
-                        $this->respond(400, ['error'=>'Número de teléfono vacío']);
-                        return;
-                    }
-                    (new PhoneRepository())->create($id, $num);
-                }
-            }
-            $db->commit();
-            $contact = $this->repo->getById($id);
-            $this->respond(201, $contact ? $contact->toArray() : ['error' => 'No encontrado']);
+            $contact = $this->service->createContact($payload);
+            $this->respond(201, $contact);
         } catch (\Exception $e) {
-            $db->rollBack();
-            $this->respond(500, ['error' => 'Error interno']);
+            $statusCode = $e->getCode() ?: 500;
+            $this->respond($statusCode, ['error' => $e->getMessage()]);
         }
     }
 
     public function update(int $id): void
     {
         $payload = json_decode(file_get_contents('php://input'), true) ?: [];
-        foreach (['first_name','last_name','email'] as $field) {
-            if (empty($payload[$field] ?? '')) {
-                $this->respond(400, ['error' => "$field es requerido"]);
-                return;
-            }
-        }
-        if (!filter_var($payload['email'], FILTER_VALIDATE_EMAIL)) {
-            $this->respond(400, ['error' => "Email no válido"]);
-            return;
-        }
-        $phones = $payload['phones'] ?? [];
+        
         try {
-            $db = Database::getConnection();
-            $db->beginTransaction();
-            $ok = $this->repo->update(
-                $id,
-                $payload['first_name'],
-                $payload['last_name'],
-                $payload['email'],
-                $phones
-            );
-            if (!$ok) {
-                $db->rollBack();
-                $this->respond(404, ['error' => 'No encontrado']);
-                return;
-            }
-            $db->commit();
-            $contact = $this->repo->getById($id);
-            $this->respond(200, $contact ? $contact->toArray() : ['error' => 'No encontrado']);
+            $contact = $this->service->updateContact($id, $payload);
+            $this->respond(200, $contact);
         } catch (\Exception $e) {
-            $db->rollBack();
-            $this->respond(500, ['error' => 'Error interno']);
+            $statusCode = $e->getCode() ?: 500;
+            $this->respond($statusCode, ['error' => $e->getMessage()]);
         }
     }
 
     public function destroy(int $id): void
     {
-        if ($this->repo->delete($id)) {
-            http_response_code(204);
-        } else {
-            $this->respond(404, ['error' => 'No encontrado']);
+        try {
+            if ($this->service->deleteContact($id)) {
+                http_response_code(204);
+            } else {
+                $this->respond(404, ['error' => 'No encontrado']);
+            }
+        } catch (\Exception $e) {
+            $statusCode = $e->getCode() ?: 500;
+            $this->respond($statusCode, ['error' => $e->getMessage()]);
         }
     }
 
